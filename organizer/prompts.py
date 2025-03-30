@@ -6,7 +6,7 @@ Centralized prompt templates for AI models.
 GEMINI_CATEGORIZATION_PROMPT = """You are a file organization assistant. Your task is to analyze files and suggest appropriate
 categorization for better organization. For each file, you should:
 1. Analyze the filename and optional content
-2. Suggest appropriate category folders (max 3 levels deep)
+2. Suggest appropriate category folders (max 5 levels deep)
 3. Suggest a clear, descriptive filename in the same language as the original filename that maintains the original extension.
 
 IMPORTANT: Never use 'Uncategorized' unless you absolutely cannot determine a better category.
@@ -29,7 +29,7 @@ Suggested category structures:
 
 Respond in the following JSON format only:
 {
-    "category_path": ["level1", "level2", "level3"],
+    "category_path": ["level1", "level2", "level3", "level4", "level5"],
     "new_filename": "descriptive_name.ext"
 }
 """

@@ -221,6 +221,13 @@ Organizer uses AI to analyze filenames and file contents to determine the most a
 - Preserves original files for review
 - Prevents redundant processing of duplicate files
 
+### 🧹 Empty Folder Cleanup
+
+- Automatically removes empty folders after organization
+- Also removes folders that only contain macOS .DS_Store files
+- Works recursively from deepest nested folders upward
+- Helps maintain a clean and tidy file system
+
 ### 📱 In-Place Organization
 
 The `--now` option organizes files within the current directory:
@@ -259,8 +266,7 @@ Integrate Organizer with your shell environment (bash, zsh) for convenient acces
 
 This script:
 - Detects your current shell (bash or zsh)
-- Checks for Poetry installation and configures accordingly
-- Adds necessary functions to your shell configuration
+- Installs organizer globally with pip
 - Sets up useful aliases
 - Enables command auto-completion
 
@@ -269,42 +275,27 @@ This script:
 Add to your `.bashrc` or `.zshrc`:
 
 ```bash
-# Organizer function
-organize() {
-  if command -v organizer &> /dev/null; then
-    organizer "$@"
-  elif [ -d "venv" ] || [ -d ".venv" ]; then
-    # Run in virtual environment
-    if [ -d "venv" ]; then
-      source venv/bin/activate
-    else
-      source .venv/bin/activate
-    fi
-    organizer "$@"
-    deactivate
-  fi
-}
-
-# Convenient aliases
-alias org="organize"
-alias orgnow="organize --now"
-alias orgplan="organize --dry-run"
+# Organizer aliases
+alias org="organizer"
+alias orgnow="organizer --now"
+alias orgplan="organizer --dry-run"
+alias orgauto="organizer --yes"
 
 # Enable auto-completion (Bash)
-_ORGANIZER_COMPLETE=bash_source organize --install-completion > /dev/null 2>&1
+_ORGANIZER_COMPLETE=bash_source organizer --install-completion > /dev/null 2>&1
 
 # For Zsh, use this instead:
-# _ORGANIZER_COMPLETE=zsh_source organize --install-completion > /dev/null 2>&1
+# _ORGANIZER_COMPLETE=zsh_source organizer --install-completion > /dev/null 2>&1
 ```
 
 ### Usage After Shell Integration
 
 ```bash
-organize           # Standard file organization
-org                # Alias for organize
-orgnow             # Organize current directory
-orgplan            # Show organization plan only
-orgauto            # Run without confirmation
+organizer         # Run organizer command
+org               # Alias for organizer
+orgnow            # Organize current directory
+orgplan           # Show organization plan only
+orgauto           # Run without confirmation
 ```
 
 ### Auto-Completion
@@ -312,8 +303,8 @@ orgauto            # Run without confirmation
 After installation, Organizer commands support tab completion:
 
 ```bash
-organize <TAB>     # Show available commands
-organize init -<TAB>   # Show available options for init command
+organizer <TAB>     # Show available commands
+organizer init -<TAB>   # Show available options for init command
 ```
 
 ---

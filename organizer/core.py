@@ -174,14 +174,16 @@ class FileOrganizer:
         """
         outdated = self.check_outdated_folders(days)
         results = {}
+        all_source_folders = set()
 
         if not outdated:
             logger.info("No outdated folders found")
             return results
 
-        for folder_info in outdated:
-            folder = folder_info["path"]  # Use dictionary access since folder_info is a dict, not an object
+        for folder_config in outdated:
+            folder = Path(folder_config["path"])  # Convert to Path
             files = self.scan_folder(folder, skip_organized)
+            all_source_folders.add(folder)
 
             if not files:
                 logger.info(f"No files found in outdated folder: {folder}")
@@ -190,68 +192,52 @@ class FileOrganizer:
 
             logger.info(f"Found {len(files)} files in outdated folder: {folder}")
 
-            # Load existing structure if available
-            existing_structure = None
-            if skip_organized:
-                existing_structure = self.load_existing_structure()
-
-            # Prepare file batches with content
-            file_batches = []
-            for file_path in files:
-                # Try to read file content for context (only for text files)
-                file_content = None
-                if self._is_text_file(file_path):
-                    try:
-                        with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
-                            file_content = f.read(5000)  # Read first 5000 characters
-                    except Exception as e:
-                        logger.debug(f"Could not read file content: {e}")
-
-                file_batches.append((file_path, file_content))
-
-            # Categorize files in bulk for better efficiency
-            categorizations = {}
-            try:
-                bulk_results = self.ai_provider.categorize_files_bulk(file_batches)
-                for (file_path, _), categorization in zip(file_batches, bulk_results):
-                    categorizations[file_path] = categorization
-            except Exception as e:
-                logger.warning(f"Bulk categorization failed: {e}. Falling back to individual categorization.")
-                # Fall back to individual processing
-                for file_path, file_content in file_batches:
-                    try:
-                        categorization = self.ai_provider.categorize_file(file_path, file_content)
-                        categorizations[file_path] = categorization
-                    except Exception as ex:
-                        logger.error(f"Failed to categorize file {file_path}: {ex}")
-                        categorizations[file_path] = {
-                            "category_path": ["Uncategorized"],
-                            "new_filename": file_path.name
-                        }
-
-            # Create folder-specific plan
+            # Create a plan for this specific folder
             folder_plan = []
-            for file_path, categorization in categorizations.items():
-                target_path = self.get_target_path(file_path, categorization)
-                folder_plan.append((file_path, target_path, categorization))
 
-            # If this is a dry run, don't actually move files
-            if dry_run:
-                results[folder] = {source_path: None for source_path, _, _ in folder_plan}
-                continue
+            for file_path in files:
+                if dry_run:
+                    # Just simulate categorization for dry run
+                    target_path = self.config.target_folder / "Simulated" / file_path.name
+                    categorization = {"category_path": ["Simulated"], "new_filename": file_path.name}
+                    logger.info(f"Would categorize {file_path} -> {target_path}")
+                    if folder not in results:
+                        results[folder] = {}
+                    results[folder][file_path] = target_path
+                else:
+                    # Process file with AI
+                    try:
+                        # Try to read file content for context
+                        file_content = None
+                        if self._is_text_file(file_path):
+                            try:
+                                with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                                    file_content = f.read(5000)  # Read first 5000 characters
+                            except Exception as e:
+                                logger.debug(f"Could not read file content: {e}")
 
-            # Execute the plan
-            folder_results = {}
-            for source_path, target_path, _ in folder_plan:
-                folder_results[source_path] = self.move_file(source_path, target_path)
+                        # Get categorization from AI
+                        categorization = self.ai_provider.categorize_file(file_path, file_content)
 
-            results[folder] = folder_results
+                        # Get target path
+                        target_path = self.get_target_path(file_path, categorization)
 
-            # Update last organized timestamp for this folder
-            self._update_last_organized([folder])
+                        # Add to folder plan
+                        folder_plan.append((file_path, target_path, categorization))
+                    except Exception as e:
+                        logger.error(f"Failed to process file {file_path}: {e}")
 
-            # Save the structure file with the folder plan
-            self.save_structure_file(folder_plan)
+            if not dry_run and folder_plan:
+                # Execute the plan
+                folder_results = self.execute_plan(folder_plan)
+                results[folder] = folder_results
+
+                # Mark this folder as organized
+                self._update_last_organized([folder])
+
+        if not dry_run:
+            # Clean up empty folders in all affected source folders
+            self.remove_empty_folders(all_source_folders)
 
         return results
 
@@ -353,22 +339,17 @@ class FileOrganizer:
         return False
 
     def organize_all(self, dry_run: bool = False, incremental: bool = True, skip_organized: bool = True) -> Dict[Path, Optional[Path]]:
-        """Organize all files in configured source folders.
+        """Organize all files in all source folders.
 
         Args:
             dry_run: Whether to perform a dry run without making changes
-            incremental: Whether to use existing structure for incremental organization
+            incremental: Whether to incrementally organize (only process new files)
             skip_organized: Whether to skip files that have already been organized
 
         Returns:
             Dict mapping source paths to target paths
         """
-        # If incremental is True, use existing structure if available
-        if incremental:
-            existing_structure = self.load_existing_structure()
-        else:
-            existing_structure = None
-
+        # Get all files to organize
         files = self.scan_all_folders(skip_organized)
 
         if not files:
@@ -377,32 +358,22 @@ class FileOrganizer:
 
         logger.info(f"Found {len(files)} files to organize")
 
-        # Categorize files, using existing structure if incremental is True
-        categorizations = self.categorize_files_bulk(files, existing_structure)
+        # Categorize files and create a plan
+        plan = self.create_plan(skip_organized)
 
-        # Create the plan
-        plan = []
-        for file_path, categorization in categorizations.items():
-            target_path = self.get_target_path(file_path, categorization)
-            plan.append((file_path, target_path, categorization))
-
-        # If this is a dry run, don't actually move files
         if dry_run:
-            return {source_path: None for source_path, _, _ in plan}
+            # Show plan without executing
+            results = {}
+            for source, target, _ in plan:
+                logger.info(f"Would move {source} -> {target}")
+                results[source] = target
+            return results
 
         # Execute the plan
-        results = {}
+        results = self.execute_plan(plan)
 
-        with SpinnerProgress(len(plan), "Moving files") as pb:
-            for source_path, target_path, _ in plan:
-                results[source_path] = self.move_file(source_path, target_path)
-                pb.update()
-
-        # Update last organized timestamp for each source folder
+        # Update last organized timestamp
         self._update_last_organized()
-
-        # Save the structure file
-        self.save_structure_file(plan)
 
         return results
 
@@ -737,7 +708,74 @@ class FileOrganizer:
         # Save structure file and log
         self.save_structure_file(plan)
 
+        # Clean up empty folders after organizing files
+        source_folders = set(source_path.parent for source_path, _, _ in plan)
+        self.remove_empty_folders(source_folders)
+
         return results
+
+    def remove_empty_folders(self, folders: Set[Path]) -> int:
+        """Remove empty folders after organization.
+
+        Empty folders are defined as folders that either:
+        1. Have no contents
+        2. Only contain .DS_Store files
+
+        Args:
+            folders: Set of folders to check for emptiness
+
+        Returns:
+            Number of folders removed
+        """
+        folders_removed = 0
+
+        # First get a list of all unique parent folders to check
+        all_folders = set()
+        for folder in folders:
+            # Add the folder and all its parent folders up to the source folder
+            current = folder
+            all_folders.add(current)
+
+            # Add parent folders
+            for source_folder in self.config.source_folders:
+                source_path = Path(source_folder["path"])
+                if current.is_relative_to(source_path):
+                    # Add all parents up to but not including the source folder
+                    while current != source_path and current.parent != current:
+                        current = current.parent
+                        all_folders.add(current)
+                    break
+
+        # Sort folders by depth (deepest first) to handle nested empty folders
+        sorted_folders = sorted(all_folders, key=lambda p: len(p.parts), reverse=True)
+
+        for folder in sorted_folders:
+            try:
+                if not folder.exists() or not folder.is_dir():
+                    continue
+
+                # List folder contents
+                contents = list(folder.iterdir())
+
+                # Check if folder is empty or only contains .DS_Store
+                if not contents:
+                    # Empty folder
+                    folder.rmdir()
+                    folders_removed += 1
+                    logger.info(f"Removed empty folder: {folder}")
+                elif len(contents) == 1 and contents[0].name == ".DS_Store":
+                    # Folder only contains .DS_Store
+                    contents[0].unlink()  # Remove .DS_Store
+                    folder.rmdir()  # Remove folder
+                    folders_removed += 1
+                    logger.info(f"Removed folder with only .DS_Store: {folder}")
+            except Exception as e:
+                logger.error(f"Failed to remove folder {folder}: {e}")
+
+        if folders_removed > 0:
+            logger.info(f"Removed {folders_removed} empty folders")
+
+        return folders_removed
 
     def process_file(self, file_path: Path, dry_run: bool = False) -> Optional[Path]:
         """Process a single file."""

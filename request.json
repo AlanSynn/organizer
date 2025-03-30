@@ -1,0 +1,26 @@
+{
+  "contents": {
+    "role": "User",
+    "parts": { "text": "hi" }
+  },
+  "system_instruction":
+  {
+    "parts": [
+      {
+        "text": "friendly"
+      }
+    ]
+  },
+  "safety_settings": {
+    "category": "SAFETY_CATEGORY",
+    "threshold": "THRESHOLD"
+  },
+  "generation_config": {
+    "temperature": TEMPERATURE,
+    "topP": TOP_P,
+    "topK": TOP_K,
+    "candidateCount": 1,
+    "maxOutputTokens": MAX_OUTPUT_TOKENS,
+    "stopSequences": STOP_SEQUENCES
+  }
+}
