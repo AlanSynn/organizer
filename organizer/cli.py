@@ -15,10 +15,13 @@ from rich.console import Console
 from rich.logging import RichHandler
 from rich.table import Table
 from rich.prompt import Confirm
+from rich.markdown import Markdown
 
 from .config import OrganizerConfig
 from .config_handler import create_default_config, add_source_folder
 from .core import FileOrganizer
+from . import __version__
+from .ai_service import create_ai_provider, LLMProvider
 
 # Setup logging
 logging.basicConfig(
@@ -661,6 +664,108 @@ def main():
     except Exception as e:
         logger.error(f"Unhandled error: {e}")
         sys.exit(1)
+
+# Add commands for template management
+template_app = typer.Typer(help="Manage prompt templates for AI categorization")
+app.add_typer(template_app, name="template")
+
+@template_app.command("show")
+def show_template():
+    """Show the current prompt template used for file categorization."""
+    try:
+        config = OrganizerConfig.load_config()
+        provider = create_ai_provider(config.ai_config)
+
+        # Check if provider has template functionality
+        if isinstance(provider, LLMProvider):
+            template_content = provider.get_template()
+            console.print(Markdown(f"## Current Template\n\n```\n{template_content}\n```"))
+        else:
+            console.print("[red]Current AI provider does not support template management[/red]")
+    except Exception as e:
+        console.print(f"[red]Error: {e}[/red]")
+        raise typer.Exit(code=1)
+
+@template_app.command("edit")
+def edit_template(editor: Optional[str] = typer.Option(None, help="Custom editor command")):
+    """Edit the prompt template used for file categorization."""
+    import tempfile
+    import subprocess
+    import os
+
+    try:
+        config = OrganizerConfig.load_config()
+        provider = create_ai_provider(config.ai_config)
+
+        # Check if provider has template functionality
+        if not isinstance(provider, LLMProvider):
+            console.print("[red]Current AI provider does not support template management[/red]")
+            raise typer.Exit(code=1)
+
+        # Get current template content
+        template_content = provider.get_template()
+
+        # Create temporary file
+        with tempfile.NamedTemporaryFile(suffix=".md", mode="w+", delete=False) as tmp:
+            tmp.write(template_content)
+            tmp_path = tmp.name
+
+        try:
+            # Determine editor to use
+            editor_cmd = editor or os.environ.get("EDITOR", "nano")
+
+            # Open editor
+            console.print(f"[green]Opening template in {editor_cmd}...[/green]")
+            result = subprocess.run([editor_cmd, tmp_path])
+
+            if result.returncode != 0:
+                console.print("[red]Editor exited with an error[/red]")
+                raise typer.Exit(code=1)
+
+            # Read updated content
+            with open(tmp_path, "r") as f:
+                new_content = f.read()
+
+            # Update template if changed
+            if new_content != template_content:
+                if provider.update_template(new_content):
+                    console.print("[green]Template updated successfully[/green]")
+                else:
+                    console.print("[red]Failed to update template[/red]")
+                    raise typer.Exit(code=1)
+            else:
+                console.print("[yellow]No changes detected[/yellow]")
+
+        finally:
+            # Clean up temporary file
+            os.unlink(tmp_path)
+
+    except Exception as e:
+        console.print(f"[red]Error: {e}[/red]")
+        raise typer.Exit(code=1)
+
+@template_app.command("reset")
+def reset_template():
+    """Reset the prompt template to default."""
+    try:
+        config = OrganizerConfig.load_config()
+        provider = create_ai_provider(config.ai_config)
+
+        # Check if provider has template functionality
+        if isinstance(provider, LLMProvider):
+            from .ai_service import DEFAULT_CATEGORIZATION_TEMPLATE
+
+            if provider.update_template(DEFAULT_CATEGORIZATION_TEMPLATE):
+                console.print("[green]Template reset to default successfully[/green]")
+            else:
+                console.print("[red]Failed to reset template[/red]")
+                raise typer.Exit(code=1)
+        else:
+            console.print("[red]Current AI provider does not support template management[/red]")
+            raise typer.Exit(code=1)
+    except Exception as e:
+        console.print(f"[red]Error: {e}[/red]")
+        raise typer.Exit(code=1)
 
 if __name__ == "__main__":
     main()
